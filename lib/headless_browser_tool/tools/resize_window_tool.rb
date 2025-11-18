@@ -15,12 +15,12 @@ module HeadlessBrowserTool
 
       def execute(width:, height:)
         # Get window size before resizing
-        size_before = browser.current_window_size
+        size_before = browser.get_window_size
 
         browser.resize_window(width, height)
 
         # Get actual window size after resizing
-        size_after = browser.current_window_size
+        size_after = browser.get_window_size
 
         {
           requested_size: {

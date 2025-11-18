@@ -326,6 +326,13 @@ module HeadlessBrowserTool
       }
     end
 
+    def get_window_size
+      size = @session.current_window.size
+      { width: size[0], height: size[1] }
+    rescue StandardError
+      { width: nil, height: nil }
+    end
+
     private
 
     def extract_attributes(element)
@@ -336,13 +343,6 @@ module HeadlessBrowserTool
         attrs[attr] = value if value && !value.empty?
       end
       attrs
-    end
-
-    def get_window_size
-      size = @session.current_window.size
-      { width: size[0], height: size[1] }
-    rescue StandardError
-      { width: nil, height: nil }
     end
 
     def get_window_position

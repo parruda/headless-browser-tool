@@ -10,12 +10,12 @@ module HeadlessBrowserTool
 
       def execute
         # Get window size before maximizing
-        size_before = browser.current_window_size
+        size_before = browser.get_window_size
 
         browser.maximize_window
 
         # Get window size after maximizing
-        size_after = browser.current_window_size
+        size_after = browser.get_window_size
 
         {
           size_before: {

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "capybara"
+require "selenium-webdriver"
 require "json"
 require "fileutils"
 require_relative "logger"
@@ -97,12 +98,29 @@ module HeadlessBrowserTool
 
     private
 
+    def register_driver
+      Capybara.register_driver :selenium_chrome do |app|
+        options = Selenium::WebDriver::Chrome::Options.new
+        
+        # Basic arguments
+        options.add_argument("--headless") if @headless
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu") if @headless
+
+        Capybara::Selenium::Driver.new(app, browser: :chrome, options: options)
+      end
+    end
+
     def create_session(session_id)
-      HeadlessBrowserTool::Logger.log.info "Creating new Capybara session: #{session_id}"
+      HeadlessBrowserTool::Logger.log.info "Creating new Capybara session: #{session_id} (headless: #{@headless})"
+
+      # Register the appropriate driver before creating the session
+      register_driver
 
       # Create a new Capybara session
       # With threadsafe mode enabled, each session is isolated
-      session = Capybara::Session.new(:selenium_chrome_headless)
+      session = Capybara::Session.new(:selenium_chrome)
 
       # Try to restore previous state
       restore_session_state(session_id, session)

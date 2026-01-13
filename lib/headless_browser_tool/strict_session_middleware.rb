@@ -15,13 +15,11 @@ module HeadlessBrowserTool
       # Extract session ID from X-Session-ID header only
       session_id = env["HTTP_X_SESSION_ID"]
 
-      # For MCP requests, require session ID
+      # For MCP requests, auto-generate session ID if not provided
       if mcp_request?(env) && (session_id.nil? || session_id.empty?)
-        return [
-          400,
-          { "Content-Type" => "application/json" },
-          [{ error: "X-Session-ID header is required for multi-session mode" }.to_json]
-        ]
+        # Auto-generate a session ID for clients that don't provide one
+        session_id = "auto-#{SecureRandom.hex(8)}"
+        env["HTTP_X_SESSION_ID"] = session_id
       end
 
       # Sanitize session ID
@@ -67,6 +65,13 @@ module HeadlessBrowserTool
 
     def mcp_request?(env)
       env["PATH_INFO"]&.start_with?("/mcp")
+    end
+
+    def oauth_discovery_request?(env)
+      path = env["PATH_INFO"]
+      return true if path&.start_with?("/.well-known/")
+      return true if path == "/register"
+      false
     end
 
     def log_request_headers(env)

@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "sinatra/base"
-require "fast_mcp"
 require "rack"
 require "fileutils"
 require "securerandom"
@@ -54,7 +53,6 @@ module HeadlessBrowserTool
         DirectorySetup.setup_directories
 
         puts "Starting HeadlessBrowserTool MCP server on port #{options[:port]}"
-        puts "Using fast-mcp for MCP protocol support"
 
         # Register shutdown hook for single session persistence
         at_exit { save_single_session } if @single_session_mode && @session_id
@@ -88,38 +86,8 @@ module HeadlessBrowserTool
       end
     end
 
-    # Use strict session middleware if in multi-session mode
-    use StrictSessionMiddleware unless Server.single_session_mode
-
-    # Create MCP server instance with custom context handler
-    mcp_server = FastMcp::Server.new(name: "headless-browser-tool", version: HeadlessBrowserTool::VERSION)
-
-    # Register all browser tools
-    HeadlessBrowserTool::Tools::ALL_TOOLS.each do |tool_class|
-      mcp_server.register_tool(tool_class)
-    end
-
-    # Create custom transport that passes session context
-    class SessionAwareTransport < FastMcp::Transports::RackTransport
-      def call(env)
-        # Get or create session ID for this connection
-        session_id = env["hbt.session_id"]
-
-        # Use the session ID from middleware (which handles persistence)
-        # Don't generate new ones here - let the middleware handle it
-
-        # Store session ID in thread local for tools to access
-        Thread.current[:hbt_session_id] = session_id
-
-        # Call parent
-        super
-      ensure
-        Thread.current[:hbt_session_id] = nil
-      end
-    end
-
-    # Use our custom transport
-    use SessionAwareTransport, mcp_server
+    # Use session middleware that allows /mcp without session for Claude Code
+    use SessionMiddleware
 
     # Session management endpoints
     get "/sessions" do
@@ -138,6 +106,112 @@ module HeadlessBrowserTool
       else
         Server.session_manager.close_session(params[:id])
         { message: "Session closed", session_id: params[:id] }.to_json
+      end
+    end
+
+    # MCP endpoint for Claude Code
+    post "/mcp" do
+      content_type :json
+      
+      begin
+        request.body.rewind
+        body = request.body.read
+        request_data = JSON.parse(body)
+        
+        case request_data["method"]
+        when "initialize"
+          {
+            jsonrpc: "2.0",
+            id: request_data["id"],
+            result: {
+              protocolVersion: "2025-06-18",
+              capabilities: {
+                tools: { listChanged: true }
+              },
+              serverInfo: {
+                name: "headless-browser",
+                version: HeadlessBrowserTool::VERSION
+              }
+            }
+          }.to_json
+          
+        when "tools/list"
+          tools = HeadlessBrowserTool::Tools::ALL_TOOLS.map do |tool_class|
+            {
+              name: "mcp__headless_browser__#{tool_class.tool_name}",
+              description: tool_class.description,
+              inputSchema: tool_class.input_schema_to_json || { type: 'object', properties: {}, required: [] }
+            }
+          end
+          
+          {
+            jsonrpc: "2.0",
+            id: request_data["id"],
+            result: { tools: tools }
+          }.to_json
+          
+        when "notifications/initialized"
+          { jsonrpc: "2.0", result: nil }.to_json
+          
+        when "tools/call"
+          tool_name = request_data.dig("params", "name")
+          tool_args = request_data.dig("params", "arguments") || {}
+          
+          # Remove prefix
+          actual_tool_name = tool_name.sub(/^mcp__headless_browser__/, "")
+          
+          tool_class = HeadlessBrowserTool::Tools::ALL_TOOLS.find do |tc|
+            tc.tool_name == actual_tool_name
+          end
+          
+          if tool_class
+            session_id = env["hbt.session_id"]
+            Thread.current[:hbt_session_id] = session_id
+            
+            begin
+              tool = tool_class.new
+              result = tool.execute(**tool_args.transform_keys(&:to_sym))
+              
+              {
+                jsonrpc: "2.0",
+                id: request_data["id"],
+                result: {
+                  content: [{ type: "text", text: result.to_json }]
+                }
+              }.to_json
+            ensure
+              Thread.current[:hbt_session_id] = nil
+            end
+          else
+            {
+              jsonrpc: "2.0",
+              id: request_data["id"],
+              error: {
+                code: -32601,
+                message: "Tool not found: #{tool_name}"
+              }
+            }.to_json
+          end
+          
+        else
+          {
+            jsonrpc: "2.0",
+            id: request_data["id"],
+            error: {
+              code: -32601,
+              message: "Method not found: #{request_data["method"]}"
+            }
+          }.to_json
+        end
+      rescue => e
+        {
+          jsonrpc: "2.0",
+          id: request_data["id"],
+          error: {
+            code: -32603,
+            message: "Internal error: #{e.message}"
+          }
+        }.to_json
       end
     end
 

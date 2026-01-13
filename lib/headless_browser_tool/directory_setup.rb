@@ -4,7 +4,7 @@ require "fileutils"
 
 module HeadlessBrowserTool
   module DirectorySetup
-    HBT_DIR = "./.hbt"
+    HBT_DIR = File.expand_path("~/.hbt")
     SCREENSHOTS_DIR = File.join(HBT_DIR, "screenshots").freeze
     SESSIONS_DIR = File.join(HBT_DIR, "sessions").freeze
     LOGS_DIR = File.join(HBT_DIR, "logs").freeze
